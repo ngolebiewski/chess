@@ -43,6 +43,11 @@ const (
 	King
 )
 
+// Piece values for Frank's brain
+var pieceValues = map[PieceType]int{
+	Pawn: 1, Knight: 3, Bishop: 3, Rook: 5, Queen: 9, King: 100,
+}
+
 type ChessPiece struct {
 	Type     PieceType
 	Color    Color
@@ -78,7 +83,7 @@ func NewGame(wager int, minutes int) *Game {
 		selectedX: -1, selectedY: -1, epX: -1, epY: -1,
 		activeColor:   White,
 		hustlerName:   "4-Move-Frank",
-		currentDialog: "Don't sweat the clock, kid.",
+		currentDialog: "Eyes on the board, kid.",
 		whiteTime:     float64(minutes * 60 * 60),
 		blackTime:     float64(minutes * 60 * 60),
 		wager:         wager,
@@ -204,15 +209,7 @@ func (g *Game) isInCheck(c Color) bool {
 	if kx == -1 {
 		return false
 	}
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
-			p := g.board[y][x]
-			if p != nil && p.Color != c && g.isMoveLegal(p, x, y, kx, ky) {
-				return true
-			}
-		}
-	}
-	return false
+	return g.isSquareAttacked(kx, ky, 1-c)
 }
 
 func (g *Game) isSquareAttacked(x, y int, attackerColor Color) bool {
@@ -337,10 +334,10 @@ func (g *Game) Update() error {
 		g.gameOver = true
 		if g.isInCheck(g.activeColor) {
 			if g.activeColor == White {
-				g.winner, g.currentDialog = 0, "MATE! Pay up."
+				g.winner, g.currentDialog = 0, "MATE! Give me my money."
 				wallet -= g.wager
 			} else {
-				g.winner, g.currentDialog = 1, "MATE! Fine..."
+				g.winner, g.currentDialog = 1, "MATE! Take the cash."
 				wallet += g.wager
 			}
 		}
@@ -416,15 +413,25 @@ func (g *Game) Update() error {
 							for tx := 0; tx < 8; tx++ {
 								if g.isMoveLegal(p, fx, fy, tx, ty) {
 									orig := g.board[ty][tx]
+
+									// CALC SCORE
+									score := 0
+									// Is the piece currently in danger?
+									inDanger := g.isSquareAttacked(fx, fy, White)
+									if inDanger {
+										score += pieceValues[p.Type] * 2 // Incentive to move piece out of danger
+									}
+									// Attack/Capture value
+									if orig != nil {
+										score += pieceValues[orig.Type] + 2
+									}
+
+									// TEST MOVE
 									g.board[ty][tx], g.board[fy][fx] = p, nil
 									if !g.isInCheck(Black) {
-										score := 0
-										if orig != nil {
-											score = int(orig.Type) + 1
-										}
-										// DON'T BLUNDER: Penalize if target square is attacked
+										// Penalty for moving INTO danger
 										if g.isSquareAttacked(tx, ty, White) {
-											score -= (int(p.Type) + 1)
+											score -= pieceValues[p.Type] + 1
 										}
 										smartMoves = append(smartMoves, move{fx, fy, tx, ty, score})
 									}
@@ -442,10 +449,6 @@ func (g *Game) Update() error {
 					if m.score > best.score {
 						best = m
 					}
-				}
-				// If no "smart" move, pick any that isn't a total blunder
-				if best.score < 0 {
-					best = smartMoves[g.rng.Intn(len(smartMoves))]
 				}
 				g.executeMove(best.fx, best.fy, best.tx, best.ty)
 			}
